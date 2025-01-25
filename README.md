@@ -12,12 +12,12 @@
 
 - Focus analytics (optional, for future updates).
 
-### Stretch Goals:
+## Develoment Journey --
+
+### More Features --
 
 - User authentication to save preferences and analytics.
 
 - Integration with productivity tools (e.g., Pomodoro timers).
 
 - Mobile responsiveness.
-
-Develoment Journey --
