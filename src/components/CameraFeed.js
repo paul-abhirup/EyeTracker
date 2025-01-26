@@ -3,60 +3,84 @@ import { loadModels, detectFaces, getEAR } from "../utils/faceDetection";
 
 const CameraFeed = () => {
   const videoRef = useRef(null);
-  const [alert, setAlert] = React.useState("");
+  // const [alert, setAlert] = useState("");
   const [isFocused, setIsFocused] = useState(true);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
 
   // Eye Aspect Ratio (EAR) threshold for detecting blinks
-  const EAR_THRESHOLD = 0.25;
+  const EAR_THRESHOLD = 0.2;
 
   useEffect(() => {
-    const startCamera = async () => {
-      // Load models from utils
-      await loadModels();
+    const loadModelsAndStartCamera = async () => {
+      try {
+        //load models
+        await loadModels();
+        setModelsLoaded(true); // Mark models as loaded
 
-      // start camera
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      videoRef.current.srcObject = stream;
-
-      // detect attentation every 0.5s
-      setInterval(async () => {
+        //start camera
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+        });
         if (videoRef.current) {
-          const detections = await detectFaces(videoRef.current);
-
-          //debugging purposes
-          // console.log("Face Detection Results:", {
-          //   detectionsFound: detections.length > 0,
-          //   detections: detections,
-          // });
-          // if (detections.length === 0) {
-          //   console.log("No face detected");
-          //   setAlert("Stay focused! No face detected.");
-          // } else {
-          //   console.log("Face detected");
-          //   setAlert("");
-          // }
-
-          if (detections.length > 0) {
-            const landmarks = detections[0].landmarks;
-            const leftEye = landmarks.getLeftEye();
-            const rightEye = landmarks.getRightEye();
-
-            const leftEAR = getEAR(leftEye);
-            const rightEAR = getEAR(rightEye);
-            const avgEAR = (leftEAR + rightEAR) / 2;
-
-            // Check if the user is paying attention
-            if (avgEAR < EAR_THRESHOLD) {
-              setIsFocused(false); // User is not focused
-            } else {
-              setIsFocused(true); // User is focused
-            }
-          }
+          videoRef.current.srcObject = stream;
         }
-      }, 500); // check every 0.5s
+
+        // start face detection
+        const intervalId = setInterval(async () => {
+          if (!videoRef.current || !modelsLoaded) return;
+
+          try {
+            const detections = await detectFaces(videoRef.current);
+
+            if (detections && detections.length > 0) {
+              const landmarks = detections[0].landmarks;
+              if (landmarks && landmarks.getLeftEye && landmarks.getRightEye) {
+                const leftEye = landmarks.getLeftEye();
+                const rightEye = landmarks.getRightEye();
+
+                const leftEAR = getEAR(leftEye);
+                const rightEAR = getEAR(rightEye);
+                const avgEAR = (leftEAR + rightEAR) / 2;
+
+                console.log(
+                  "Left EAR:",
+                  leftEAR,
+                  "Right EAR:",
+                  rightEAR,
+                  "Average EAR:",
+                  avgEAR
+                );
+                // setIsFocused(avgEAR >= EAR_THRESHOLD);
+
+                if (avgEAR < EAR_THRESHOLD) {
+                  setIsFocused(false); // User is not focused
+                  console.log("Not Focused 😴");
+                } else {
+                  setIsFocused(true); // User is focused
+                  console.log("Focused 😊");
+                }
+              }
+            } else {
+              setIsFocused(false); // No faces detected
+              console.log("No faces detected");
+            }
+          } catch (error) {
+            console.error("Error in face detection:", error);
+          }
+        }, 200); // 200ms interval
+
+        // Cleanup interval and camera stream on unmount
+        return () => {
+          clearInterval(intervalId);
+          stream.getTracks().forEach((track) => track.stop());
+        };
+      } catch (error) {
+        console.error("Error starting camera:", error);
+      }
     };
-    startCamera();
-  }, []);
+
+    loadModelsAndStartCamera();
+  }, [modelsLoaded]); // Run this effect only after models are loaded
 
   return (
     <div>
