@@ -1,9 +1,8 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import { loadModels, detectFaces, getEAR } from "../utils/faceDetection";
 
-const CameraFeed = () => {
+const CameraFeed = ({ isWorkSession }) => {
   const videoRef = useRef(null);
-  // const [alert, setAlert] = useState("");
   const [isFocused, setIsFocused] = useState(true);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [alertMessage, setAlertMessage] = useState("");
@@ -11,22 +10,96 @@ const CameraFeed = () => {
   // Eye Aspect Ratio (EAR) threshold for detecting blinks
   const EAR_THRESHOLD = 0.2;
 
-  // Function to trigger alerts
+  // Function to trigger alerts       //using debouncing to avoid multiple alerts
+  let alertTimeout;
+
   const triggerAlert = () => {
-    setAlertMessage("Stay focused! 😊");
-    // const audio = new Audio("/aisa-mat-karo.mp3");
-    // audio.play();
-    setTimeout(() => setAlertMessage(""), 5000); // Clear alert after 3 seconds
+    if (!alertTimeout) {
+      setAlertMessage("Stay focused! 😊");
+      alertTimeout = setTimeout(() => {
+        setAlertMessage("");
+        alertTimeout = null;
+      }, 5000); // Clear alert after 5 secondslet alertTimeout;
+    }
   };
 
   useEffect(() => {
+    // const loadModelsAndStartCamera = async () => {
+    //   try {
+    //     //load models
+    //     await loadModels();
+    //     setModelsLoaded(true); // Mark models as loaded
+
+    //     //start camera
+    //     const stream = await navigator.mediaDevices.getUserMedia({
+    //       video: true,
+    //     });
+    //     if (videoRef.current) {
+    //       videoRef.current.srcObject = stream;
+    //     }
+
+    //     // start face detection
+    //     const intervalId = setInterval(async () => {
+    //       if (!videoRef.current || !modelsLoaded || !isWorkSession) return;
+
+    //       try {
+    //         const detections = await detectFaces(videoRef.current);
+
+    //         if (detections && detections.length > 0) {
+    //           const landmarks = detections[0].landmarks;
+    //           if (landmarks && landmarks.getLeftEye && landmarks.getRightEye) {
+    //             const leftEye = landmarks.getLeftEye();
+    //             const rightEye = landmarks.getRightEye();
+
+    //             const leftEAR = getEAR(leftEye);
+    //             const rightEAR = getEAR(rightEye);
+    //             const avgEAR = (leftEAR + rightEAR) / 2;
+
+    //             console.log(
+    //               "Left EAR:",
+    //               leftEAR,
+    //               "Right EAR:",
+    //               rightEAR,
+    //               "Average EAR:",
+    //               avgEAR
+    //             );
+    //             // setIsFocused(avgEAR >= EAR_THRESHOLD);
+
+    //             if (avgEAR < EAR_THRESHOLD) {
+    //               setIsFocused(false); // User is not focused
+    //               console.log("Not Focused 😴");
+    //               triggerAlert(); // Trigger alert
+    //             } else {
+    //               setIsFocused(true); // User is focused
+    //               console.log("Focused 😊");
+    //             }
+    //           }
+    //         } else {
+    //           setIsFocused(false); // No faces detected
+    //           console.log("No faces detected");
+    //           triggerAlert(); // Trigger alert
+    //         }
+    //       } catch (error) {
+    //         console.error("Error in face detection:", error);
+    //       }
+    //     }, 1000); // 1000ms interval
+
+    //     // Cleanup interval and camera stream on unmount
+    //     return () => {
+    //       clearInterval(intervalId);
+    //       stream.getTracks().forEach((track) => track.stop());
+    //     };
+    //   } catch (error) {
+    //     console.error("Error starting camera:", error);
+    //   }
+    // };
+
+    //
     const loadModelsAndStartCamera = async () => {
       try {
-        //load models
         await loadModels();
-        setModelsLoaded(true); // Mark models as loaded
+        setModelsLoaded(true);
 
-        //start camera
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
         });
@@ -34,19 +107,19 @@ const CameraFeed = () => {
           videoRef.current.srcObject = stream;
         }
 
-        // start face detection
-        const intervalId = setInterval(async () => {
-          if (!videoRef.current || !modelsLoaded) return;
+        const detectFacesLoop = async () => {
+          if (!videoRef.current || !modelsLoaded || !isWorkSession) {
+            requestAnimationFrame(detectFacesLoop);
+            return;
+          }
 
           try {
             const detections = await detectFaces(videoRef.current);
-
             if (detections && detections.length > 0) {
               const landmarks = detections[0].landmarks;
               if (landmarks && landmarks.getLeftEye && landmarks.getRightEye) {
                 const leftEye = landmarks.getLeftEye();
                 const rightEye = landmarks.getRightEye();
-
                 const leftEAR = getEAR(leftEye);
                 const rightEAR = getEAR(rightEye);
                 const avgEAR = (leftEAR + rightEAR) / 2;
@@ -59,39 +132,37 @@ const CameraFeed = () => {
                   "Average EAR:",
                   avgEAR
                 );
-                // setIsFocused(avgEAR >= EAR_THRESHOLD);
 
                 if (avgEAR < EAR_THRESHOLD) {
                   setIsFocused(false); // User is not focused
                   console.log("Not Focused 😴");
-                  triggerAlert(); // Trigger alert
+                  triggerAlert();
                 } else {
-                  setIsFocused(true); // User is focused
-                  console.log("Focused 😊");
+                  console.log("Focused 😊"); // User is focused
+                  setIsFocused(true);
                 }
               }
             } else {
               setIsFocused(false); // No faces detected
-              console.log("No faces detected");
-              triggerAlert(); // Trigger alert
+              triggerAlert();
             }
           } catch (error) {
             console.error("Error in face detection:", error);
           }
-        }, 500); // 200ms interval
 
-        // Cleanup interval and camera stream on unmount
-        return () => {
-          clearInterval(intervalId);
-          stream.getTracks().forEach((track) => track.stop());
+          requestAnimationFrame(detectFacesLoop);
         };
+
+        detectFacesLoop();
       } catch (error) {
         console.error("Error starting camera:", error);
       }
     };
 
     loadModelsAndStartCamera();
-  }, [modelsLoaded]); // Run this effect only after models are loaded
+  }, [modelsLoaded, isWorkSession, triggerAlert]);
+  // Run this effect only after models are loaded
+  // or when session state changes
 
   return (
     <div>
@@ -116,4 +187,4 @@ const CameraFeed = () => {
   );
 };
 
-export default CameraFeed;
+export default React.memo(CameraFeed);
