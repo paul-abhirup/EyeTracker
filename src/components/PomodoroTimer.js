@@ -2,34 +2,32 @@
 import React, { useState, useEffect } from "react";
 
 const PomodoroTimer = ({ onSessionEnd, onWorkSessionChange }) => {
-  const [minutes, setMinutes] = useState(25); // Default work interval
+  const [minutes, setMinutes] = useState(25);
   const [seconds, setSeconds] = useState(0);
   const [isActive, setIsActive] = useState(false);
   const [isWorkSession, setIsWorkSession] = useState(true);
 
   useEffect(() => {
-    let startTime;
     let interval;
-
     if (isActive) {
-      startTime = performance.now();
       interval = setInterval(() => {
-        const elapsedTime = Math.floor((performance.now() - startTime) / 1000);
-        const remainingSeconds = minutes * 60 + seconds - elapsedTime;
-
-        if (remainingSeconds <= 0) {
+        if (seconds > 0) {
+          setSeconds(seconds - 1);
+        } else if (minutes > 0) {
+          setMinutes(minutes - 1);
+          setSeconds(59);
+        } else {
+          // Session ended
           clearInterval(interval);
-          onSessionEnd(isWorkSession ? "Time for a break!" : "Back to work!");
-          onWorkSessionChange(!isWorkSession); // Notify parent component
-          setIsWorkSession(!isWorkSession);
-          setMinutes(isWorkSession ? 5 : 25);
+          const nextSession = !isWorkSession;
+          setIsWorkSession(nextSession);
+          onWorkSessionChange(nextSession); // Notify parent
+          onSessionEnd(nextSession ? "Time to work!" : "Time for a break!");
+          setMinutes(nextSession ? 25 : 5);
           setSeconds(0);
           setIsActive(false);
-        } else {
-          setMinutes(Math.floor(remainingSeconds / 60));
-          setSeconds(remainingSeconds % 60);
         }
-      }, 100);
+      }, 1000);
     }
 
     return () => clearInterval(interval);
@@ -51,7 +49,7 @@ const PomodoroTimer = ({ onSessionEnd, onWorkSessionChange }) => {
     setMinutes(25);
     setSeconds(0);
     setIsWorkSession(true);
-    onWorkSessionChange(true); // Reset to work session
+    onWorkSessionChange(true);
   };
 
   return (

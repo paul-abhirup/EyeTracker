@@ -3,22 +3,33 @@ import * as faceapi from "face-api.js";
 //Load models
 export const loadModels = async () => {
   try {
-    console.log("Loading face detection models...");
-    await faceapi.nets.tinyFaceDetector.loadFromUri("/models");
-    await faceapi.nets.faceLandmark68Net.loadFromUri("/models");
-    // await faceapi.nets.tinyYolov2.loadFromUri("/models");
+    console.log("Starting to load models...");
+    const MODEL_URL = "/models";
+
+    // Load models sequentially and wait for each
+    await faceapi.nets.tinyFaceDetector.load(MODEL_URL);
+    await faceapi.nets.faceLandmark68Net.load(MODEL_URL);
+
     console.log("Models loaded successfully");
+    return true;
   } catch (error) {
     console.error("Error loading models:", error);
+    return false;
   }
 };
 
 //detect faces
+// In utils/faceDetection.js
 export const detectFaces = async (videoElement) => {
-  const detections = await faceapi
-    .detectAllFaces(videoElement, new faceapi.TinyFaceDetectorOptions())
-    .withFaceLandmarks();
-  return detections;
+  try {
+    const detections = await faceapi
+      .detectAllFaces(videoElement, new faceapi.TinyFaceDetectorOptions())
+      .withFaceLandmarks();
+    return detections;
+  } catch (error) {
+    console.error("Error detecting faces:", error);
+    return null;
+  }
 };
 
 // Function to calculate EAR
