@@ -1,136 +1,183 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
-import { loadModels, detectFaces } from "../utils/faceDetection";
+import { loadModels, detectFaces, getEAR } from "../utils/faceDetection";
+
+// Constants
+const EAR_THRESHOLD = 0.2; // Threshold to determine if the user is focused
+const HISTORY_LIMIT = 25; // Number of frames to consider for smoothing emotions
+const DETECTION_INTERVAL = 500; // Face detection interval in milliseconds
 
 const CameraFeed = ({ isWorkSession }) => {
+  // Refs
   const videoRef = useRef(null);
+  const alertTimeoutRef = useRef(null);
+  const isFocusedRef = useRef(true);
+
+  // State
   const [isFocused, setIsFocused] = useState(true);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [alertMessage, setAlertMessage] = useState("");
-  const alertTimeoutRef = useRef(null);
+  const [emotion, setEmotion] = useState(null);
+  const [emotionHistory, setEmotionHistory] = useState([]);
 
-  const EAR_THRESHOLD = 0.2;
-
-  // EAR (Eye Aspect Ratio) calculation
-  const getEAR = (eye) => {
-    console.log("Eye Points for EAR Calculation:", eye);
-
-    if (!eye || eye.length !== 6) {
-      console.error("Invalid eye points:", eye);
-      return 0;
-    }
-
-    const A = Math.hypot(eye[1].x - eye[5].x, eye[1].y - eye[5].y);
-    const B = Math.hypot(eye[2].x - eye[4].x, eye[2].y - eye[4].y);
-    const C = Math.hypot(eye[0].x - eye[3].x, eye[0].y - eye[3].y);
-
-    const ear = (A + B) / (2 * C);
-    console.log("EAR:", ear);
-
-    return ear;
-  };
-
-  const triggerAlert = useCallback(() => {
-    if (!alertTimeoutRef.current) {
-      setAlertMessage("Stay focused! 😊");
-      alertTimeoutRef.current = setTimeout(() => {
-        setAlertMessage("");
-        alertTimeoutRef.current = null;
-      }, 5000);
+  // Update focus state and log changes
+  const updateFocusState = useCallback((newFocusState) => {
+    if (isFocusedRef.current !== newFocusState) {
+      isFocusedRef.current = newFocusState;
+      setIsFocused(newFocusState);
+      console.log("Focus state updated to:", newFocusState);
     }
   }, []);
 
-  useEffect(() => {
-    if (!isWorkSession) {
-      setIsFocused(true); // Reset focus state during breaks
-      setAlertMessage(""); // Clear any alerts
+  // Trigger alert with a cooldown period
+  const triggerAlert = useCallback((message = "Stay focused! 😊") => {
+    if (!alertTimeoutRef.current) {
+      setAlertMessage(message);
+      alertTimeoutRef.current = setTimeout(() => {
+        setAlertMessage("");
+        alertTimeoutRef.current = null;
+      }, 5000); // Cooldown period of 5 seconds
+      console.log("Alert triggered:", message);
     }
-  }, [isWorkSession]);
+  }, []);
 
+  // Analyze emotions and update state
+  const analyzeEmotions = useCallback(
+    (expressions) => {
+      if (!expressions || Object.keys(expressions).length === 0) {
+        console.error("No expressions found in detections.");
+        return null;
+      }
+
+      const dominantEmotion = Object.keys(expressions).reduce((a, b) =>
+        expressions[a] > expressions[b] ? a : b
+      );
+      // console.log("Dominant emotion in this frame:", dominantEmotion);
+
+      setEmotionHistory((prev) => {
+        const newHistory = [...prev, dominantEmotion];
+        if (newHistory.length > HISTORY_LIMIT) newHistory.shift(); // Keep history limited
+        console.log("Updated emotion history:", newHistory);
+        return newHistory;
+      });
+
+      // Calculate most frequent emotion
+      const emotionCounts = emotionHistory.reduce((counts, emotion) => {
+        counts[emotion] = (counts[emotion] || 0) + 1;
+        return counts;
+      }, {});
+
+      const mostFrequentEmotion = Object.keys(emotionCounts).reduce((a, b) =>
+        emotionCounts[a] > emotionCounts[b] ? a : b
+      );
+
+      setEmotion(mostFrequentEmotion);
+      console.log("Most frequent emotion in history:", mostFrequentEmotion);
+
+      // Suggest activities based on the most frequent emotion
+      switch (mostFrequentEmotion) {
+        case "sad":
+          triggerAlert(
+            "You seem sad. Take a break and listen to calming music."
+          );
+          break;
+        case "angry":
+          triggerAlert("You seem angry. Try some deep breathing exercises.");
+          break;
+        case "fearful":
+        case "disgusted":
+          triggerAlert("You seem stressed. Take a short walk or meditate.");
+          break;
+        case "happy":
+          triggerAlert("You seem happy! Keep up the good work.");
+          break;
+        default:
+          break;
+      }
+    },
+    [emotionHistory, triggerAlert]
+  );
+
+  // Main face detection loop
   const detectFacesLoop = useCallback(async () => {
-    if (!isWorkSession) {
-      console.log("Not in work session, skipping detection");
-      requestAnimationFrame(detectFacesLoop);
-      return;
-    }
-
-    if (!videoRef.current || !modelsLoaded) {
+    if (!isWorkSession || !videoRef.current || !modelsLoaded) {
       console.log("Skipping detection: Camera not ready or models not loaded");
-      requestAnimationFrame(detectFacesLoop);
       return;
     }
 
     try {
-      console.log("Detecting faces...");
       const detections = await detectFaces(videoRef.current);
-      console.log("Detections from detectFaces:", detections);
+      console.log("Detections:", detections);
 
       if (detections && detections.length > 0) {
-        console.log("Faces detected:", detections.length);
-        const landmarks = detections[0].landmarks;
-        console.log("Landmarks:", landmarks);
+        const { landmarks, expressions } = detections[0];
 
-        if (landmarks && landmarks.getLeftEye && landmarks.getRightEye) {
-          const leftEye = landmarks.getLeftEye();
-          const rightEye = landmarks.getRightEye();
+        // Emotion Detection
+        if (expressions) {
+          analyzeEmotions(expressions);
+        }
 
-          console.log("Left Eye Points:", leftEye);
-          console.log("Right Eye Points:", rightEye);
-
-          const leftEAR = getEAR(leftEye);
-          const rightEAR = getEAR(rightEye);
+        // Focus Detection (EAR)
+        if (
+          landmarks &&
+          landmarks.getLeftEye &&
+          landmarks.getRightEye &&
+          landmarks.getLeftEye().length === 6 &&
+          landmarks.getRightEye().length === 6
+        ) {
+          const leftEAR = getEAR(landmarks.getLeftEye());
+          const rightEAR = getEAR(landmarks.getRightEye());
           const avgEAR = (leftEAR + rightEAR) / 2;
 
-          console.log("Left EAR:", leftEAR);
-          console.log("Right EAR:", rightEAR);
           console.log("Average EAR:", avgEAR);
 
           if (avgEAR < EAR_THRESHOLD) {
-            setIsFocused(false); // User not focused
-            triggerAlert();
+            updateFocusState(false);
+            console.log("User is not focused");
+            triggerAlert("Your eyes look tired. Take a quick break!");
           } else {
-            setIsFocused(true); // User focused
+            updateFocusState(true);
+            console.log("User is focused");
           }
-        } else {
-          console.log("Landmarks not available");
         }
       } else {
         console.log("No faces detected");
         setIsFocused(false);
-        triggerAlert();
+        triggerAlert("No faces detected! Stay alert!");
       }
     } catch (error) {
       console.error("Error in face detection:", error);
     }
 
-    requestAnimationFrame(detectFacesLoop);
-  }, [isWorkSession, modelsLoaded, triggerAlert]);
+    setTimeout(() => {
+      requestAnimationFrame(detectFacesLoop);
+    }, DETECTION_INTERVAL);
+  }, [
+    isWorkSession,
+    modelsLoaded,
+    analyzeEmotions,
+    updateFocusState,
+    triggerAlert,
+  ]);
 
+  // Initialize camera and load models
   useEffect(() => {
     const initialize = async () => {
       try {
-        // Start camera
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
+          video: { width: 640, height: 360 },
         });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.onloadedmetadata = () => {
-            console.log("Webcam feed is ready");
             videoRef.current.play();
-
-            // Load models
-            console.log("Loading models...");
-            loadModels().then(() => {
-              console.log("Models loaded successfully");
-              setModelsLoaded(true);
-
-              // Start detection loop
-              // Add a small delay before starting the detection loop
-              setTimeout(() => {
-                console.log("Starting detection loop...");
+            loadModels()
+              .then(() => {
+                setModelsLoaded(true);
                 detectFacesLoop();
-              }, 500); // 500ms delay
-            });
+              })
+              .catch((error) => {
+                console.error("Error loading models:", error);
+              });
           };
         }
       } catch (error) {
@@ -141,10 +188,22 @@ const CameraFeed = ({ isWorkSession }) => {
     initialize();
   }, [detectFacesLoop]);
 
+  // Reset states when work session ends
+  useEffect(() => {
+    if (!isWorkSession) {
+      setIsFocused(true);
+      setAlertMessage("");
+      setEmotion(null);
+      console.log("Work session ended. Resetting states.");
+    }
+  }, [isWorkSession]);
+
+  // Render component
   return (
     <div>
       <video ref={videoRef} autoPlay playsInline muted />
       <p>{isFocused ? "Focused 😊" : "Not Focused 😴"}</p>
+      {emotion && <p>Detected Emotion: {emotion}</p>}
       {alertMessage && (
         <div
           style={{
