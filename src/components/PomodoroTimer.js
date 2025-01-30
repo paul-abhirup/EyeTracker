@@ -23,7 +23,7 @@ const PomodoroTimer = ({ onSessionEnd, onWorkSessionChange }) => {
           setIsWorkSession(nextSession);
           onWorkSessionChange(nextSession); // Notify parent
           onSessionEnd(nextSession ? "Time to work!" : "Time for a break!");
-          setMinutes(nextSession ? 25 : 5);
+          setMinutes(nextSession ? 1 : 5);
           setSeconds(0);
           setIsActive(false);
         }

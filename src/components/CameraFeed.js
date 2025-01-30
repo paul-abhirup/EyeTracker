@@ -1,12 +1,17 @@
-import React, { useRef, useEffect, useState, useCallback } from "react";
+import React, {
+  useRef,
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
 import { loadModels, detectFaces, getEAR } from "../utils/faceDetection";
 
 // Constants
-const EAR_THRESHOLD = 0.2; // Threshold to determine if the user is focused
-const HISTORY_LIMIT = 25; // Number of frames to consider for smoothing emotions
+const EAR_THRESHOLD = 0.25; // Threshold to determine if the user is focused
 const DETECTION_INTERVAL = 500; // Face detection interval in milliseconds
 
-const CameraFeed = ({ isWorkSession }) => {
+const CameraFeed = React.memo(({ isWorkSession }) => {
   // Refs
   const videoRef = useRef(null);
   const alertTimeoutRef = useRef(null);
@@ -16,10 +21,9 @@ const CameraFeed = ({ isWorkSession }) => {
   const [isFocused, setIsFocused] = useState(true);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [alertMessage, setAlertMessage] = useState("");
-  const [emotion, setEmotion] = useState(null);
-  const [emotionHistory, setEmotionHistory] = useState([]);
+  const [emotionHistory, setEmotionHistory] = useState([]); // Store all emotions during the session
 
-  // Update focus state and log changes
+  // Memoized functions
   const updateFocusState = useCallback((newFocusState) => {
     if (isFocusedRef.current !== newFocusState) {
       isFocusedRef.current = newFocusState;
@@ -28,7 +32,6 @@ const CameraFeed = ({ isWorkSession }) => {
     }
   }, []);
 
-  // Trigger alert with a cooldown period
   const triggerAlert = useCallback((message = "Stay focused! 😊") => {
     if (!alertTimeoutRef.current) {
       setAlertMessage(message);
@@ -40,62 +43,21 @@ const CameraFeed = ({ isWorkSession }) => {
     }
   }, []);
 
-  // Analyze emotions and update state
-  const analyzeEmotions = useCallback(
-    (expressions) => {
-      if (!expressions || Object.keys(expressions).length === 0) {
-        console.error("No expressions found in detections.");
-        return null;
-      }
+  // Analyze emotions and store them in history
+  const analyzeEmotions = useCallback((expressions) => {
+    if (!expressions || Object.keys(expressions).length === 0) {
+      console.error("No expressions found in detections.");
+      return null;
+    }
 
-      const dominantEmotion = Object.keys(expressions).reduce((a, b) =>
-        expressions[a] > expressions[b] ? a : b
-      );
-      // console.log("Dominant emotion in this frame:", dominantEmotion);
+    const dominantEmotion = Object.keys(expressions).reduce((a, b) =>
+      expressions[a] > expressions[b] ? a : b
+    );
+    console.log("Dominant emotion in this frame:", dominantEmotion);
 
-      setEmotionHistory((prev) => {
-        const newHistory = [...prev, dominantEmotion];
-        if (newHistory.length > HISTORY_LIMIT) newHistory.shift(); // Keep history limited
-        console.log("Updated emotion history:", newHistory);
-        return newHistory;
-      });
-
-      // Calculate most frequent emotion
-      const emotionCounts = emotionHistory.reduce((counts, emotion) => {
-        counts[emotion] = (counts[emotion] || 0) + 1;
-        return counts;
-      }, {});
-
-      const mostFrequentEmotion = Object.keys(emotionCounts).reduce((a, b) =>
-        emotionCounts[a] > emotionCounts[b] ? a : b
-      );
-
-      setEmotion(mostFrequentEmotion);
-      console.log("Most frequent emotion in history:", mostFrequentEmotion);
-
-      // Suggest activities based on the most frequent emotion
-      switch (mostFrequentEmotion) {
-        case "sad":
-          triggerAlert(
-            "You seem sad. Take a break and listen to calming music."
-          );
-          break;
-        case "angry":
-          triggerAlert("You seem angry. Try some deep breathing exercises.");
-          break;
-        case "fearful":
-        case "disgusted":
-          triggerAlert("You seem stressed. Take a short walk or meditate.");
-          break;
-        case "happy":
-          triggerAlert("You seem happy! Keep up the good work.");
-          break;
-        default:
-          break;
-      }
-    },
-    [emotionHistory, triggerAlert]
-  );
+    // Store the dominant emotion in history
+    setEmotionHistory((prev) => [...prev, dominantEmotion]);
+  }, []);
 
   // Main face detection loop
   const detectFacesLoop = useCallback(async () => {
@@ -132,11 +94,9 @@ const CameraFeed = ({ isWorkSession }) => {
 
           if (avgEAR < EAR_THRESHOLD) {
             updateFocusState(false);
-            console.log("User is not focused");
             triggerAlert("Your eyes look tired. Take a quick break!");
           } else {
             updateFocusState(true);
-            console.log("User is focused");
           }
         }
       } else {
@@ -188,39 +148,89 @@ const CameraFeed = ({ isWorkSession }) => {
     initialize();
   }, [detectFacesLoop]);
 
+  // Calculate average emotion and trigger alert when session ends
+  useEffect(() => {
+    if (!isWorkSession && emotionHistory.length > 0) {
+      // Calculate most frequent emotion
+      const emotionCounts = emotionHistory.reduce((counts, emotion) => {
+        counts[emotion] = (counts[emotion] || 0) + 1;
+        return counts;
+      }, {});
+
+      const mostFrequentEmotion = Object.keys(emotionCounts).reduce((a, b) =>
+        emotionCounts[a] > emotionCounts[b] ? a : b
+      );
+
+      console.log("Most frequent emotion in session:", mostFrequentEmotion);
+
+      // Trigger alert based on the most frequent emotion
+      switch (mostFrequentEmotion) {
+        case "sad":
+          triggerAlert(
+            "You seemed sad during the session. Take a break and listen to calming music."
+          );
+          break;
+        case "angry":
+          triggerAlert(
+            "You seemed angry during the session. Try some deep breathing exercises."
+          );
+          break;
+        case "fearful":
+        case "disgusted":
+          triggerAlert(
+            "You seemed stressed during the session. Take a short walk or meditate."
+          );
+          break;
+        case "happy":
+          triggerAlert(
+            "You seemed happy during the session! Keep up the good work."
+          );
+          break;
+        default:
+          break;
+      }
+
+      // Reset emotion history for the next session
+      setEmotionHistory([]);
+    }
+  }, [isWorkSession, emotionHistory, triggerAlert]);
+
   // Reset states when work session ends
   useEffect(() => {
     if (!isWorkSession) {
       setIsFocused(true);
       setAlertMessage("");
-      setEmotion(null);
       console.log("Work session ended. Resetting states.");
     }
   }, [isWorkSession]);
 
-  // Render component
-  return (
-    <div>
-      <video ref={videoRef} autoPlay playsInline muted />
-      <p>{isFocused ? "Focused 😊" : "Not Focused 😴"}</p>
-      {emotion && <p>Detected Emotion: {emotion}</p>}
-      {alertMessage && (
-        <div
-          style={{
-            position: "fixed",
-            top: "20px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            padding: "10px",
-            backgroundColor: "yellow",
-            border: "1px solid black",
-          }}
-        >
-          {alertMessage}
-        </div>
-      )}
-    </div>
+  // Memoized JSX to prevent unnecessary re-renders
+  const memoizedJSX = useMemo(
+    () => (
+      <div>
+        <video ref={videoRef} autoPlay playsInline muted />
+        <p>{isFocused ? "Focused 😊" : "Not Focused 😴"}</p>
+        {alertMessage && (
+          <div
+            style={{
+              position: "fixed",
+              top: "20px",
+              left: "50%",
+              transform: "translateX(-50%)",
+              padding: "10px",
+              backgroundColor: "yellow",
+              border: "1px solid black",
+            }}
+          >
+            {alertMessage}
+          </div>
+        )}
+      </div>
+    ),
+    [isFocused, alertMessage]
   );
-};
 
-export default React.memo(CameraFeed);
+  return memoizedJSX;
+});
+
+export default CameraFeed;
